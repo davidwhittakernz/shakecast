@@ -539,11 +539,41 @@ class Group(Base):
                     cls.lon_min <= point.lon,
                     cls.lon_max >= point.lon)
     
-    @hybrid_method    
-    def has_spec(self, not_type=''):
-        specs = [s.notification_type.lower() for s in self.specs]
-        event_types = [s.event_type.lower() for s in self.specs]
-        return bool(not_type.lower() in specs + event_types)
+    def _get_specs(self,
+            notification_type,
+            scenario=False,
+            heartbeat=False,
+            inspection=None):
+        notification_type = notification_type.lower()
+        specs = [s for s in self.specs if
+                s.notification_type.lower() == notification_type]
+        filtered = [s for s in specs if
+                (((s.event_type.lower() == 'scenario') is scenario)
+                and ((s.event_type.lower() == 'heartbeat') is heartbeat)
+                or s.event_type.lower() == 'all')]
+
+        if len(filtered) > 0 and inspection is not None:
+            filtered = [s for s in filtered if
+                    str(s.inspection_priority).lower() == inspection]
+
+        return filtered
+
+    def get_new_event_spec(self, scenario=False):
+        specs = self._get_specs('new_event', scenario=scenario)
+
+        return specs[0] if len(specs) > 0 else None
+
+    def get_inspection_spec(self, inspection, scenario=False):
+        specs = self._get_specs('damage', inspection=inspection, scenario=scenario)
+
+        return specs[0] if len(specs) > 0 else None
+
+    def gets_notification(self, notification_type, scenario=False, heartbeat=False):
+        specs = self._get_specs(notification_type,
+                scenario=scenario,
+                heartbeat=heartbeat)
+
+        return len(specs) > 0
 
     def has_alert_level(self, level):
         # grey groups get no-inspection notifications
@@ -565,32 +595,27 @@ class Group(Base):
         return level.lower() in levels
 
     def get_alert_levels(self):
-        levels = [s.inspection_priority.lower() for s in self.specs if 
-                                s.notification_type == 'DAMAGE']
+        specs = self._get_specs('damage')
 
-        return levels
+        return [spec.inspection_priority.lower() for spec in specs
+                if spec is not None]
 
     def get_scenario_alert_levels(self):
-        levels = [s.inspection_priority.lower() for s in self.specs if 
-                                s.notification_type == 'DAMAGE' and s.event_type == 'SCENARIO']
+        specs = self._get_specs('damage', scenario=True)
 
-        return levels
+        return [spec.inspection_priority.lower() for spec in specs
+                if spec is not None]
 
-    def check_min_mag(self, mag=10):
-        min_mags = [s.minimum_magnitude for s in self.specs 
-                    if s.notification_type.lower() == 'new_event']
-        for min_mag in min_mags:
-            if mag > min_mag:
-                return True
-        return False
+    def check_min_mag(self, mag):
+        new_event = self.get_new_event_spec()
+
+        return (new_event.minimum_magnitude < mag
+                if new_event is not None else None)
 
     def get_min_mag(self):
-        mags = [s.minimum_magnitude for s in self.specs 
-                    if s.notification_type.lower() == 'new_event']
-        if len(mags) == 0:
-            return 0
-        else:
-            return min(mags)
+        new_event = self.get_new_event_spec()
+
+        return new_event.minimum_magnitude if new_event is not None else None
 
 
 class Group_Specification(Base):
